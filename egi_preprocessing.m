@@ -7,13 +7,15 @@ MATLAB Script to read and preprocess NetStation EGI raw Data
 3. Make sure the location file is stored in data_path
 4. In section 'Load trial information from the E-prime xlsx file': Set
    variables subjs and processed_path to the group you want to preprocess
-5. Make sure you are using eeglab v2022.1 with egilegacy and cleanline plugins
-   installed
+5. Change epochingEvts in the Extract epochs section to the events list you
+   want to export
+6. Make sure you are using eeglab v2022.1 with egilegacy, ICLabel and 
+   cleanline plugins installed
 Author:
 - The event importing part was initially wrote by Garima Joshi
   garima AT cbcs.ac.in, Centre of Behavioural and Cognitive Sciences (CBCS) of
   University of Allahabad.
-- The current version and remaining parts were revised by Kai
+- The current version and remaining parts were wrote by Kai
 %}
 
 %% Clear the workspace
@@ -258,6 +260,56 @@ for iSubjs = 1 : length(subjs)
     
     % To calculate the runtime of this subject
     timeElapsed = toc;
+end
+
+%% Remove artifacts ICs via ICLabel
+for iSubjs = 1 : length(subjs)
+    % Create new EEG set
+    STUDY = []; CURRENTSTUDY = 0; ALLEEG = []; EEG = []; CURRENTSET = []; ALLCOM = [];
+    
+    %load the files after ICA
+    EEG = pop_loadset('filename', ['preprocessed_ica-' subjs{iSubjs}.name '.set'], 'filepath', fullfile(data_path, processed_path));
+    
+    % The 6 categories are (in order) Brain, Muscle, Eye, Heart, Line Noise, Channel Noise, Other.
+    % We are going to flag the Muscle, Eye, Line or Channel noise
+    % channel which has a probility greater than 0.9 as artifact IC
+    thresholds = [0 0; 0.9 1; 0.9 1; 0 0; 0.9 1; 0.9 1; 0 0];
+
+    % run ICLabel classification
+    EEG = iclabel(EEG);
+
+    % Flag ICs
+    EEG = pop_icflag(EEG, thresholds);
+    % Get all the flagged ICs
+    rejICs   = find(EEG.reject.gcompreject);
+    % Remove flagged componnets
+    EEG = pop_subcomp(EEG, rejICs);
+    EEG = eeg_checkset( EEG );
+    
+    EEG = pop_saveset( EEG, 'filename', ['preprocessed_ica_removed-' subjs{iSubjs}.name '.set'], 'filepath', fullfile(data_path, processed_path));
+    eeglab redraw % Redraw the main EEGLAB window
+end
+
+%% Extract epochs
+% The time-locking events you want to extract
+epochingEvts = {'AYc', 'BXc'};
+for iSubjs = 1 : length(subjs)
+    for iEvt = 1:length(epochingEvts)
+        epochingEvt = epochingEvts{iEvt};
+
+        % Create new EEG set
+        STUDY = []; CURRENTSTUDY = 0; ALLEEG = []; EEG = []; CURRENTSET = []; ALLCOM = [];
+        
+        %load the files after ICA
+        EEG = pop_loadset('filename', ['preprocessed_ica_removed-' subjs{iSubjs}.name '.set'], 'filepath', fullfile(data_path, processed_path));
+        
+        % Extract epochs for time-locking event (-1s to 2s)
+        EEG = pop_epoch( EEG, {  epochingEvt  }, [-1  2], 'newname', 'EGI file pruned with ICA epochs', 'epochinfo', 'yes');
+        EEG = eeg_checkset( EEG );
+        
+        EEG = pop_saveset( EEG, 'filename', ['preprocessed_epoched_' epochingEvt '-' subjs{iSubjs}.name '.set'], 'filepath', fullfile(data_path, processed_path));
+        eeglab redraw % Redraw the main EEGLAB window
+    end
 end
 
 %% Functions
